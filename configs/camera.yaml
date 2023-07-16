@@ -1,0 +1,9 @@
+MQTT:
+  HOST_NAME: "camera1"
+
+POST_PROCE:
+  thr1: 0.1
+
+CAMERA:
+  FPS: 60
+  EXPOSURE: 1000
