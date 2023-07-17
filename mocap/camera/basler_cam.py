@@ -9,7 +9,7 @@ from multiprocessing import Pipe, Process, Array
 import time
 import ctypes
 
-from .tools import read_config, SampleImageEventHandler
+from .tools import read_config, SampleImageEventHandler, detect_marker
 
 class MocapCamera():
     
@@ -23,12 +23,7 @@ class MocapCamera():
         # Create a pipe for image passing
         self.camera_pipe = Pipe()
         
-        ARR_SIZE = 1080*1440
-        
-        self.shared_arr = Array(
-            ctypes.c_ubyte, 
-            ARR_SIZE,
-        )
+
          
         # Confgiure MQTT server
         host_name = self.config["MQTT"].get("HOST_NAME", "foo")
@@ -44,6 +39,27 @@ class MocapCamera():
         
         # Connect camera
         self.camera = pylon.InstantCamera(pylon.TlFactory.GetInstance().CreateFirstDevice()) 
+        
+        self.camera.Open() 
+        # Set fps
+        self.camera.AcquisitionFrameRateEnable.SetValue(True)
+        self.camera.AcquisitionFrameRate.SetValue(fps)
+        # Set exposure time
+        self.camera.ExposureTime.SetValue(exposure)
+        # Set pixel format to mono
+        self.camera.PixelFormat.SetValue("Mono8")
+        self.WIDTH = self.camera.Width.GetValue()
+        self.HEIGHT = self.camera.Height.GetValue()
+
+        self.camera.Close()
+         
+        ARR_SIZE = self.WIDTH * self.HEIGHT
+        
+        self.shared_arr = Array(
+            ctypes.c_ubyte, 
+            ARR_SIZE,
+        )
+        
         if hard_trigg: 
             self.camera.RegisterConfiguration(
                 pylon.SoftwareTriggerConfiguration(), 
@@ -58,16 +74,7 @@ class MocapCamera():
             pylon.Cleanup_Delete,
         )
        
-        self.camera.Open() 
-        # Set fps
-        self.camera.AcquisitionFrameRateEnable.SetValue(True)
-        self.camera.AcquisitionFrameRate.SetValue(fps)
-        # Set exposure time
-        self.camera.ExposureTime.SetValue(exposure)
-        # Set pixel format to mono
-        self.camera.PixelFormat.SetValue("Mono8")
-        self.camera.Close()
-         
+
         # Initialize processes
         self.initialize_processes()
         
@@ -91,15 +98,17 @@ class MocapCamera():
             cnt, ts = pipe_in.recv()
             with shared_memory.get_lock():
                 frame = np.copy(shared_np)
-                frame = frame.reshape((1080, 1440))
-        
+                frame = frame.reshape((self.HEIGHT, self.WIDTH))
+
+            # Post processing as in old project
+            objs = detect_marker(frame, self.config["POST_PROC"]) 
+            # print("Delay: ", f"{(time.perf_counter_ns() - ts)*1e-9:.4f}")
+            
+            for _ ,x, y, r in objs:
+                img = cv.circle(frame, (int(x), int(y)), int(r), (0,0,255), 5)
             cv.putText(frame, str(cnt), (50, 50), cv.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2, cv.LINE_AA)
             cv.imshow("Frame", frame)
             cv.waitKey(1)
-            
-            # frame = np.zeros((100, 100))
-            print("Delay: ", (time.perf_counter_ns() - ts)*1e-9)
-
             
     def run(self):
         try:
