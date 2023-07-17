@@ -1,1 +1,1 @@
-from basler_cam import MocapCamera
+from .basler_cam import MocapCamera

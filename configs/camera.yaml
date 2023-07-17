@@ -5,5 +5,6 @@ POST_PROCE:
   thr1: 0.1
 
 CAMERA:
-  FPS: 60
-  EXPOSURE: 1000
+  FPS: 10
+  EXPOSURE: 6000
+  HARD_TRIGG: false
