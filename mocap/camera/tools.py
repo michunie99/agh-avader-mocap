@@ -81,7 +81,6 @@ def detect_marker(img, config):
 
 def get_calibration_results(imgs_path, config):
     ROWS, COLS = config["ROWS"], config["COLS"]
-    SQUARE_SIZE = config["SQUARE_SIZE"] 
     # termination criteria
     criteria = (cv.TERM_CRITERIA_EPS + cv.TERM_CRITERIA_MAX_ITER, 30, 0.001)
     # prepare object points, like (0,0,0), (1,0,0), (2,0,0) ....,(6,5,0)
