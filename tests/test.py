@@ -6,3 +6,5 @@ cam.start_detect()
 input()
 
 cam.stop()
+
+print(cam.run_calibration()[1])

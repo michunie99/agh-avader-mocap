@@ -81,12 +81,13 @@ def detect_marker(img, config):
 
 def get_calibration_results(imgs_path, config):
     ROWS, COLS = config["ROWS"], config["COLS"]
-    
+    SQUARE_SIZE = config["SQUARE_SIZE"] 
     # termination criteria
     criteria = (cv.TERM_CRITERIA_EPS + cv.TERM_CRITERIA_MAX_ITER, 30, 0.001)
     # prepare object points, like (0,0,0), (1,0,0), (2,0,0) ....,(6,5,0)
     objp = np.zeros((ROWS*COLS,3), np.float32)
     objp[:,:2] = np.mgrid[0:COLS,0:ROWS].T.reshape(-1,2)
+    
     # Arrays to store object points and image points from all the images.
     objpoints = [] # 3d point in real world space
     imgpoints = [] # 2d points in image plane.
@@ -97,19 +98,20 @@ def get_calibration_results(imgs_path, config):
     # Find all images
     imgs = imgs_path.glob("*.bmp")
     for frame in imgs:
-        img = cv.imread(str(frame))
+        img = cv.imread(str(frame), -1)
+        print(img.shape)
          # Find the chess board corners
         ret, corners = cv.findChessboardCorners(img, (COLS,ROWS), None)
         # If found, add object points, image points (after refining them)
         if ret == True:
             objpoints.append(objp)
+            corners2 = cv.cornerSubPix(img,corners, (11,11), (-1,-1), criteria)
+            imgpoints.append(corners2)
+            # Draw and display the corners
+            cv.drawChessboardCorners(img, (COLS,ROWS), corners2, ret)
+            cv.imshow('img', img)
+            cv.waitKey(500)
             
-        corners2 = cv.cornerSubPix(img,corners, (11,11), (-1,-1), criteria)
-        imgpoints.append(corners2)
-        # Draw and display the corners
-        cv.drawChessboardCorners(img, (COLS,ROWS), corners2, ret)
-        cv.imshow('img', img)
-        cv.waitKey(500)
     cv.destroyAllWindows()
     
     calib_res = cv.calibrateCamera(
@@ -176,14 +178,14 @@ class ImageSaver():
      
         
 if __name__ == "__main__":
-    saver = ImageSaver("tmp", 10, 1, True)
+    # saver = ImageSaver("tmp", 10, 1, True)
     
-    while saver.save_image(np.random.randint(0,255, (224, 224, 3))):
-        time.sleep(1)
+    # while saver.save_image(np.random.randint(0,255, (224, 224, 3))):
+    #     time.sleep(1)
         
-    input("After this the dir will be deleted")
+    # input("After this the dir will be deleted")
     
-    del saver
+    # del saver
     
-    print("Tmp dir was deleted")
-    
+    # print("Tmp dir was deleted")
+    print(get_calibration_results("tmp/", read_config("configs/nano_cam.yaml")["CALIB"])[1])

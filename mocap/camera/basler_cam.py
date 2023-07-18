@@ -30,7 +30,7 @@ class MocapCamera():
         self.img_saver = ImageSaver(
             tmp_dir="tmp/", 
             num_imgs=30, 
-            every_n=60, 
+            every_n=10, 
             presistant=self.config["SAVE_CALIB"],
         )
         
@@ -41,7 +41,7 @@ class MocapCamera():
                 clean_session=True,
         )
         
-        self.init_mqtt()
+        # self.init_mqtt()
         # Create a pipe for image passing
         self.camera_pipe = Pipe()
 
@@ -154,11 +154,13 @@ class MocapCamera():
                 frame = np.copy(shared_np)
                 frame = frame.reshape((self.HEIGHT, self.WIDTH))
 
-            res = self.img_saver(frame)
+            res = self.img_saver.save_image(frame)
             
             if res:
+                print("exiting ..")
                 # End after images has been colected
                 break
+    
         
     def run_calibration(self):
         self.running = "calibration"
@@ -166,10 +168,17 @@ class MocapCamera():
         for proc in self.processes["calibration"]:
             proc.start() 
             
+        self.camera.StartGrabbing(
+            # pylon.GrabStrategy_OneByOne, 
+            pylon.GrabStrategy_LatestImageOnly,
+            pylon.GrabLoop_ProvidedByInstantCamera,
+        )
+            
         # Wait for photos
         for proc in self.processes["calibration"]:
             proc.join()
-            
+        self.camera.StopGrabbing()  
+        
         # Perform calibration
         calib_res = get_calibration_results(
             self.img_saver.tmp_dir,
