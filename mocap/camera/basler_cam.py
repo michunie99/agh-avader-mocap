@@ -9,7 +9,13 @@ from multiprocessing import Pipe, Process, Array
 import time
 import ctypes
 
-from .tools import read_config, SampleImageEventHandler, detect_marker
+from .tools import (
+    read_config, 
+    SampleImageEventHandler, 
+    detect_marker,
+    ImageSaver,
+    get_calibration_results,
+    )
 
 class MocapCamera():
     
@@ -20,17 +26,24 @@ class MocapCamera():
         # Read configuration
         self.config = read_config(config_file)
         
-        # Create a pipe for image passing
-        self.camera_pipe = Pipe()
+        # TODO - add to config
+        self.img_saver = ImageSaver(
+            tmp_dir="tmp/", 
+            num_imgs=30, 
+            every_n=60, 
+            presistant=self.config["SAVE_CALIB"],
+        )
         
-
-         
         # Confgiure MQTT server
         host_name = self.config["MQTT"].get("HOST_NAME", "foo")
         self.client = mqtt.Client(
-            host_name,
-            clean_session=True,
+                host_name,
+                clean_session=True,
         )
+        
+        self.init_mqtt()
+        # Create a pipe for image passing
+        self.camera_pipe = Pipe()
 
         # Parse camera configuration
         fps = self.config["CAMERA"].get("FPS", 60)
@@ -61,6 +74,7 @@ class MocapCamera():
         )
         
         if hard_trigg: 
+            # TODO - add as a hard ware trigger
             self.camera.RegisterConfiguration(
                 pylon.SoftwareTriggerConfiguration(), 
                 pylon.RegistrationMode_ReplaceAll,
@@ -74,20 +88,29 @@ class MocapCamera():
             pylon.Cleanup_Delete,
         )
        
-
         # Initialize processes
         self.initialize_processes()
         
     def initialize_processes(self):
         """ Initialize processes and communitaion for processing pipe line """
-        cam_proc = Process(
-            target=self.post_process, 
+        detect = Process(
+            target=self._detect, 
             args=(self.camera_pipe[1], self.shared_arr)
         )
-        self.processes = [cam_proc]
+        
+        calibration = Process(
+            target=self._calibraion,
+            args=(self.camera_pipe[1], self.shared_arr)
+        )
+        
+        self.processes = {
+            "detect": [detect],
+            "calibration": [calibration]
             
-    def post_process(self, pipe_in, shared_memory):
-        """ Thread used for post processing """
+        }
+            
+    def _detect(self, pipe_in, shared_memory):
+        """ Thread used for marker detection """
 
         shared_np = np.frombuffer(
             shared_memory.get_obj(), 
@@ -95,38 +118,84 @@ class MocapCamera():
         )
         
         while True:
-            cnt, ts = pipe_in.recv()
+            item = pipe_in.recv()
+            if item is None:
+                break
+            cnt, ts = item
             with shared_memory.get_lock():
                 frame = np.copy(shared_np)
                 frame = frame.reshape((self.HEIGHT, self.WIDTH))
 
             # Post processing as in old project
             objs = detect_marker(frame, self.config["POST_PROC"]) 
-            # print("Delay: ", f"{(time.perf_counter_ns() - ts)*1e-9:.4f}")
-            
+            print("Delay: ", f"{(time.perf_counter_ns() - ts)*1e-9:.4f} sec")
             for _ ,x, y, r in objs:
                 img = cv.circle(frame, (int(x), int(y)), int(r), (0,0,255), 5)
             cv.putText(frame, str(cnt), (50, 50), cv.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2, cv.LINE_AA)
             cv.imshow("Frame", frame)
             cv.waitKey(1)
             
-    def run(self):
-        try:
-            for proc in self.processes:
-                proc.start()
-                
-            self.camera.StartGrabbing(
-                # pylon.GrabStrategy_OneByOne, 
-                pylon.GrabStrategy_LatestImageOnly,
-                pylon.GrabLoop_ProvidedByInstantCamera,
-            )
+            # TODO - send detections to processor
+    
+    def _calibraion(self, pipe_in, shared_memory):
+        """ Thread used for marker detection """
+        
+        shared_np = np.frombuffer(
+            shared_memory.get_obj(), 
+            dtype=np.uint8,
+        )
+        
+        while True:
+            item = pipe_in.recv()
+            if item is None:
+                break
+            cnt, ts = item
+            with shared_memory.get_lock():
+                frame = np.copy(shared_np)
+                frame = frame.reshape((self.HEIGHT, self.WIDTH))
+
+            res = self.img_saver(frame)
             
-            while True:
-               pass
-           
-        except KeyboardInterrupt:
-            self.camera.StopGrabbing()
-            # Send poison pill
-            self.camera_pipe[0].send(None)
-            for proc in self.processes:
-                proc.join()
+            if res:
+                # End after images has been colected
+                break
+        
+    def run_calibration(self):
+        self.running = "calibration"
+        
+        for proc in self.processes["calibration"]:
+            proc.start() 
+            
+        # Wait for photos
+        for proc in self.processes["calibration"]:
+            proc.join()
+            
+        # Perform calibration
+        calib_res = get_calibration_results(
+            self.img_saver.tmp_dir,
+            self.config["CALIB"],
+        )
+        
+        # TODO - send calibration results to the MQTT server
+        
+        return calib_res
+        
+    def start_detect(self):
+        self.running = "detect"
+        for proc in self.processes["detect"]:
+            proc.start()
+            
+        self.camera.StartGrabbing(
+            # pylon.GrabStrategy_OneByOne, 
+            pylon.GrabStrategy_LatestImageOnly,
+            pylon.GrabLoop_ProvidedByInstantCamera,
+        )
+            
+     
+    def stop(self):      
+        self.camera.StopGrabbing()
+        
+        # Send poison pill
+        self.camera_pipe[0].send(None)
+        for proc in self.processes[self.running]:
+            proc.join()

@@ -1,4 +1,8 @@
 from mocap.camera import MocapCamera
 
-cam = MocapCamera("configs/camera.yaml")
-cam.run()
+cam = MocapCamera("configs/nano_cam.yaml")
+cam.start_detect()
+
+input()
+
+cam.stop()

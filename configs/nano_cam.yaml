@@ -13,3 +13,9 @@ CAMERA:
   FPS: 60
   EXPOSURE: 6000
   HARD_TRIGG: false
+
+CALIB:
+  ROWS: 6
+  COLS: 7
+
+SAVE_CALIB: true
