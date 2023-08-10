@@ -4,10 +4,13 @@ import paho.mqtt.client as mqtt
 import cv2 as cv
 import matplotlib.pyplot as plt
 import numpy as np
+from .imagezmq import ImageSender
 
 from multiprocessing import Pipe, Process, Array
 import time
 import ctypes
+import socket   
+
 
 from .tools import (
     read_config, 
@@ -35,12 +38,14 @@ class MocapCamera():
         )
         
         # Confgiure MQTT server
-        host_name = self.config["MQTT"].get("HOST_NAME", "foo")
-        self.client = mqtt.Client(
-                host_name,
-                clean_session=True,
-        )
-        
+       # self.host_name = self.config["MQTT"].get("HOST_NAME", "foo")
+       # self.client = mqtt.Client(
+       #         self.host_name,
+       #         clean_session=True,
+       # )
+
+        hostname=socket.gethostname()   
+        self.IPAddr=socket.gethostbyname(hostname)   
         # self.init_mqtt()
         # Create a pipe for image passing
         self.camera_pipe = Pipe()
@@ -74,7 +79,7 @@ class MocapCamera():
         )
         
         if hard_trigg: 
-            # TODO - add as a hard ware trigger
+            # TODO - add as a hardware trigger
             self.camera.RegisterConfiguration(
                 pylon.SoftwareTriggerConfiguration(), 
                 pylon.RegistrationMode_ReplaceAll,
@@ -102,13 +107,47 @@ class MocapCamera():
             target=self._calibraion,
             args=(self.camera_pipe[1], self.shared_arr)
         )
+
+        send_images  = Process(
+            target=self._send_image,
+            args=(self.camera_pipe[1], self.shared_arr)
+        )
         
         self.processes = {
             "detect": [detect],
-            "calibration": [calibration]
-            
+            "calibration": [calibration],
+            "send_images": [send_images],
         }
-            
+     
+    def _send_image(self, pipe_in, shared_memory):
+        """ Send images to the server to be saved """
+        shared_np = np.frombuffer(
+            shared_memory.get_obj(), 
+            dtype=np.uint8,
+        )
+        sender = ImageSender(
+                connect_to=f"tcp://*:5555",
+                REQ_REP=False
+        )
+
+        while True:
+            item = pipe_in.recv()
+            if item is None:
+                    break
+            status = item
+            with shared_memory.get_lock():
+                frame = np.copy(shared_np)
+
+            frame = frame.reshape((self.HEIGHT, self.WIDTH))
+            print(f"Sending images: {frame.shape}")
+            # Send zeroM
+            ret_code, frame = cv.imencode(
+                ".jpg", frame, [int(cv.IMWRITE_JPEG_QUALITY), 95])
+            sender.send_jpg_pubsub(
+                f"{self.IPAddr}", 
+                frame
+            )
+
     def _detect(self, pipe_in, shared_memory):
         """ Thread used for marker detection """
 
@@ -134,7 +173,6 @@ class MocapCamera():
             cv.putText(frame, str(cnt), (50, 50), cv.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2, cv.LINE_AA)
             cv.imshow("Frame", frame)
             cv.waitKey(1)
-            
             # TODO - send detections to processor
     
     def _calibraion(self, pipe_in, shared_memory):
@@ -146,21 +184,31 @@ class MocapCamera():
         )
         
         while True:
-            item = pipe_in.recv()
-            if item is None:
-                break
-            cnt, ts = item
+            #item = pipe_in.recv()
+            #if item is None:
+            #    break
+            #cnt, ts = item
             with shared_memory.get_lock():
                 frame = np.copy(shared_np)
                 frame = frame.reshape((self.HEIGHT, self.WIDTH))
 
-            res = self.img_saver.save_image(frame)
-            
+            res = self.img_saver.save_image(frame)            
             if res:
                 print("exiting ..")
                 # End after images has been colected
                 break
     
+    def start_sending(self):
+        self.running = "send_images"
+        for proc in self.processes["send_images"]:
+            proc.start()
+            
+        self.camera.StartGrabbing(
+            # pylon.GrabStrategy_OneByOne, 
+            pylon.GrabStrategy_LatestImageOnly,
+            pylon.GrabLoop_ProvidedByInstantCamera,
+        )
+            
         
     def run_calibration(self):
         self.running = "calibration"
@@ -205,6 +253,7 @@ class MocapCamera():
         self.camera.StopGrabbing()
         
         # Send poison pill
-        self.camera_pipe[0].send(None)
+        # self.camera_pipe[0].send(None)
+        # TODO - kill all child processes
         for proc in self.processes[self.running]:
             proc.join()

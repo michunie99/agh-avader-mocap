@@ -1,5 +1,5 @@
 MQTT:
-  HOST_NAME: "camera1"
+  HOST_NAME: "pc_cam1"
 
 POST_PROC:
   BIN_THR: 180
@@ -11,11 +11,14 @@ POST_PROC:
 
 CAMERA:
   FPS: 60
-  EXPOSURE: 12000
+  EXPOSURE: 6000
   HARD_TRIGG: false
 
 CALIB:
   ROWS: 6
   COLS: 9
+
+SERVER:
+  SEND_IMG: true
 
 SAVE_CALIB: true

@@ -130,15 +130,15 @@ class SampleImageEventHandler(pylon.ImageEventHandler):
         self.pipe_out = pipe_out
         self.shared_arr = shared_arr
         self.shared_arr_np = np.frombuffer(self.shared_arr.get_obj(), dtype=np.uint8)
+        self.cnt=0
         
     def OnImageGrabbed(self, camera, grabResult):
         if grabResult.GrabSucceeded():
             img = grabResult.GetArray()
             with self.shared_arr.get_lock():
                 self.shared_arr_np[:] = img.reshape(-1)
-            cnt = grabResult.ImageNumber
             # self.pipe_out.send(time.perf_counter_ns())
-            self.pipe_out.send((cnt, time.perf_counter_ns()))
+            self.pipe_out.send("OK")
 
 class ImageSaver():
     """ 
